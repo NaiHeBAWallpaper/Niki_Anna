@@ -141,7 +141,8 @@ const AUDIO_DETAIL = [
 
 
 const HITBOX = {
-	headpat: { xMin: 1050, xMax: 1500, yMin: 100, yMax: 360 },
+	headpat: { xMin: 1050, xMax: 1500, yMin: 100, yMax: 360, start: 'Pat_01_M', end: 'PatEnd_01_M' },
+	facepat: { xMin: 1080, xMax: 1515, yMin: 380, yMax: 650, start: 'Pat2_01_M', end: 'PatEnd2_01_M' },
 	voiceline: { xMin: 900, xMax: 1600, yMin: 750, yMax: 1400 }
 };
 
@@ -282,12 +283,12 @@ function t(n, side) {
 
 // -1 = [No Entry], 1 = Headpat, 2 = Voiceline, 3 = Eye Track
 function pressedMouse(x, y) {
-	tx = t(x, 'x');
-	ty = t(y, 'y');
-	if (tx > HITBOX.headpat.xMin && tx < HITBOX.headpat.xMax && ty > HITBOX.headpat.yMin && ty < HITBOX.headpat.yMax && mouseOptions.headpatting) {
-		spineData.state.setAnimation(1, 'Pat_01_M', false);
-		// if (HAS_A.point) spineData.state.setAnimation(2, 'Pat_01_A', false);
-		headpatOrigin = { x, y };
+	const tx = t(x, 'x');
+	const ty = t(y, 'y');
+	const pat = [HITBOX.facepat, HITBOX.headpat].find(box => tx >= box.xMin && tx < box.xMax && ty >= box.yMin && ty < box.yMax);
+	if (pat && mouseOptions.headpatting) {
+		spineData.state.setAnimation(1, pat.start, false);
+		headpatOrigin = { x, y, endAnimation: pat.end };
 		mouseSelect = 1;
 	}
 	else if (tx > HITBOX.voiceline.xMin && tx < HITBOX.voiceline.xMax && ty > HITBOX.voiceline.yMin && ty < HITBOX.voiceline.yMax && mouseOptions.voicelines) {
@@ -386,10 +387,11 @@ function movedMouse(x, y) {
 function releasedMouse() {
 	switch (mouseSelect) {
 		case 1: {
+			const { endAnimation } = headpatOrigin;
 			headpatOrigin = null;
 			headpatTarget.set(0, 0);
 			const state = spineData.state;
-			const motion = state.setAnimation(1, 'PatEnd_01_M', false);
+			const motion = state.setAnimation(1, endAnimation, false);
 			state.addEmptyAnimation(1, 0.5, motion.animationEnd);
 			state.addEmptyAnimation(2, 0.5, 0);
 			headpatCooldown = setTimeout(() => {
@@ -478,6 +480,8 @@ function init() {
 			if (props.dialogy) textbox.style.top = props.dialogy.value + '%';
 			if (props.drawHitboxes) mouseOptions.drawHitboxes = props.drawHitboxes.value;
 			if (props.lensflare) {
+				glareEnabled = props.lensflare.value;
+				if (spineData) applyGlareOpacity(spineData.skeleton.data);
 				showLensflare = props.lensflare.value;
 				if (showLensflare) restoreSpecifiedSlots();
 			}
@@ -732,6 +736,25 @@ function load(dynamicBinaryPath, dynamicAtlasPath) {
 	canvas.style.visibility = 'visible';
 }
 
+const GLARE_SLOTS = new Set([
+	"BG_Fx_04", "BG_Fx_01", "FX"
+]);
+const GLARE_OPACITY = 0.24;
+let glareEnabled = true;
+const originalGlareOpacity = new WeakMap();
+
+// Scale attachment opacity once so animated slot colors still control the light.
+function applyGlareOpacity(skeletonData) {
+	for (const skin of skeletonData.skins) {
+		for (const { slotIndex, attachment } of skin.getAttachments()) {
+			const slot = skeletonData.slots[slotIndex];
+			if (!GLARE_SLOTS.has(slot.name) || slot.blendMode !== 1 || !attachment.color) continue;
+			if (!originalGlareOpacity.has(attachment)) originalGlareOpacity.set(attachment, attachment.color.a);
+			attachment.color.a = originalGlareOpacity.get(attachment) * (glareEnabled ? GLARE_OPACITY : 0);
+		}
+	}
+}
+
 function loadSpineData(binaryPath, atlasPath, premultipliedAlpha) {
 	// Load the texture atlas from the AssetManager.
 	let atlas = assetManager.get(atlasPath);
@@ -745,6 +768,7 @@ function loadSpineData(binaryPath, atlasPath, premultipliedAlpha) {
 	// Set the scale to apply during parsing, parse the file, and create a new skeleton.
 	skeletonBinary.scale = 1;
 	let skeletonData = skeletonBinary.readSkeletonData(assetManager.get(binaryPath));
+	applyGlareOpacity(skeletonData);
 	let skeleton = new spine.Skeleton(skeletonData);
 	let bounds = calculateSetupPoseBounds(skeleton);
 
@@ -770,9 +794,7 @@ let showLensflare = false;
 let slotsHidden = false;
 
 // 定义需要隐藏的骨骼名称列表（全局变量）
-const slotsToHide = [
-	'FX', 'BG_Fx_01', 'BG_Fx_02', 'BG_Fx_03', 'BG_Fx_04'
-];
+const slotsToHide = ["BG_Fx_02","BG_Fx_03"];
 
 function hideSpecifiedSlots() {
 	if (!showLensflare && spineData && spineData.skeleton) {
